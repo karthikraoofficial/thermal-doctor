@@ -44,7 +44,9 @@ function ConvertTo-ThermalReport {
         $lines.Add('')
         foreach ($flag in $matching) {
             $hash = if ($flag.Sha256) { " SHA256: ``$($flag.Sha256)``" } else { '' }
-            $lines.Add("- **$($flag.Name)** (PID $($flag.Pid)): $($flag.Reason). Path: ``$($flag.Path)``.$hash")
+            $processId = if ($null -ne $flag.Pid) { " (PID $($flag.Pid))" } else { '' }
+            $location = if ($flag.Path) { " Path: ``$($flag.Path)``." } else { '' }
+            $lines.Add("- **$($flag.Name)**${processId}: $($flag.Reason).$location$hash")
         }
         $lines.Add('')
     }

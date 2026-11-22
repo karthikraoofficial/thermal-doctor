@@ -140,6 +140,57 @@ Describe 'Get-RedFlags' {
         }
     }
 
+    Context 'persistence entries' {
+        function Get-PersistenceFlags($Kind, $Command) {
+            $candidate = [pscustomobject]@{
+                Processes   = @()
+                Persistence = @([pscustomobject]@{ Kind = $Kind; Name = 'demo-entry'; Command = $Command })
+            }
+            @(Get-RedFlags -Snapshot $candidate)
+        }
+
+        It 'flags a miner in a startup command as High' {
+            $flag = @(Get-PersistenceFlags 'Run key' 'C:\Tools\xmrig.exe --background' | Where-Object { $_.Rule -eq 'PersistenceMiner' })
+
+            $flag.Count | Should Be 1
+            $flag[0].Severity | Should Be 'High'
+        }
+
+        It 'flags encoded PowerShell in a scheduled task as High' {
+            $flag = @(Get-PersistenceFlags 'Scheduled task' 'powershell.exe -enc ZABlAG0AbwA=' | Where-Object { $_.Rule -eq 'PersistencePowerShell' })
+
+            $flag.Count | Should Be 1
+            $flag[0].Severity | Should Be 'High'
+        }
+
+        It 'flags a startup command in Temp or Users\Public as Medium' {
+            foreach ($command in 'C:\Users\demo\AppData\Local\Temp\a.exe', 'C:\Users\Public\a.exe') {
+                $flag = @(Get-PersistenceFlags 'Run key' $command | Where-Object { $_.Rule -eq 'PersistenceRiskyPath' })
+
+                $flag.Count | Should Be 1
+                $flag[0].Severity | Should Be 'Medium'
+            }
+        }
+
+        It 'flags an AppData startup command as Low because many apps install there' {
+            $flag = @(Get-PersistenceFlags 'Run key' 'C:\Users\demo\AppData\Local\Programs\Demo\demo.exe' | Where-Object { $_.Rule -eq 'PersistenceRiskyPath' })
+
+            $flag.Count | Should Be 1
+            $flag[0].Severity | Should Be 'Low'
+        }
+
+        It 'flags any WMI event subscription as Medium' {
+            $flag = @(Get-PersistenceFlags 'WMI subscription' 'CommandLineEventConsumer: demo' | Where-Object { $_.Rule -eq 'WmiSubscription' })
+
+            $flag.Count | Should Be 1
+            $flag[0].Severity | Should Be 'Medium'
+        }
+
+        It 'does not flag an ordinary Program Files startup command' {
+            (Get-PersistenceFlags 'Run key' '"C:\Program Files\Demo\demo.exe" --tray').Count | Should Be 0
+        }
+    }
+
     It 'does not treat an ordinary Program Files path as user-writable' {
         $candidate = [pscustomobject]@{
             Processes = @([pscustomobject]@{

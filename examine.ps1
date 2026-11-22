@@ -16,10 +16,14 @@ Import-Module (Join-Path $PSScriptRoot 'src\Collectors.psm1') -Force
 Write-Host "Sampling CPU for $SampleSeconds seconds..."
 $processes = @(Get-ProcessSnapshot -SampleSeconds $SampleSeconds)
 Write-Host 'Reading GPU and temperatures...'
-$sections = @(Get-GpuSection; Get-TemperatureSection)
+$gpuSection = Get-GpuSection
+$temperatureSection = Get-TemperatureSection
+Write-Host 'Reading persistence...'
+$persistence = Get-PersistenceData
 $snapshot = [pscustomobject]@{
-    Processes = $processes
-    Sections  = $sections
+    Processes   = $processes
+    Persistence = @($persistence.Entries)
+    Sections    = @($gpuSection, $temperatureSection, $persistence.Section)
 }
 
 $flags = @(Get-RedFlags -Snapshot $snapshot)

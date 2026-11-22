@@ -24,9 +24,44 @@ function New-RedFlag {
     }
 }
 
+function Get-PersistenceFlags {
+    param($Entry)
+
+    $command = "$($Entry.Command)"
+    $lowered = $command.ToLowerInvariant()
+    $executable = if ($command -match '^\s*"?([A-Za-z]:\\[^"]+?\.exe)') { $Matches[1] } else { $null }
+    $subject = [pscustomobject]@{ Name = "$($Entry.Kind): $($Entry.Name)"; Pid = $null; Path = $executable; Sha256 = $null }
+
+    if ($Entry.Kind -eq 'WMI subscription') {
+        New-RedFlag -Severity 'Medium' -Rule 'WmiSubscription' -Process $subject -Reason 'WMI event subscriptions are rare and can run code silently'
+        return
+    }
+
+    $miner = $script:KnownMiners | Where-Object { $lowered.Contains($_) } | Select-Object -First 1
+    if ($miner) {
+        New-RedFlag -Severity 'High' -Rule 'PersistenceMiner' -Process $subject -Reason "Starts automatically and matches known miner name '$miner'"
+    }
+
+    if ($lowered -match '(powershell|pwsh)' -and ($command -match $script:EncodedCommandPattern -or $command -match $script:HiddenWindowPattern)) {
+        New-RedFlag -Severity 'High' -Rule 'PersistencePowerShell' -Process $subject -Reason 'Starts PowerShell automatically with an encoded command or hidden window'
+    }
+
+    if ($command -match '(?i)\\(Temp|Users\\Public)\\') {
+        New-RedFlag -Severity 'Medium' -Rule 'PersistenceRiskyPath' -Process $subject -Reason "Starts automatically from '$($Matches[1])'"
+    }
+    elseif ($command -match '(?i)\\(AppData|ProgramData)\\') {
+        New-RedFlag -Severity 'Low' -Rule 'PersistenceRiskyPath' -Process $subject -Reason "Starts automatically from '$($Matches[1])', where many apps legitimately install"
+    }
+}
+
 function Get-RedFlags {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Snapshot)
+
+    $persistence = $Snapshot.PSObject.Properties['Persistence']
+    if ($persistence) {
+        foreach ($entry in @($persistence.Value)) { Get-PersistenceFlags -Entry $entry }
+    }
 
     foreach ($process in @($Snapshot.Processes)) {
         $identity = "$($process.Name) $($process.Path)".ToLowerInvariant()

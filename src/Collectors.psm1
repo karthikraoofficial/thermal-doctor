@@ -198,4 +198,84 @@ function Get-TemperatureSection {
     return New-Section -Title 'Temperatures' -Status $status -Note $reading.Note -Rows @($reading.Rows)
 }
 
-Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection
+function Get-PersistenceData {
+    [CmdletBinding()]
+    param()
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $problems = New-Object System.Collections.Generic.List[string]
+    $add = { param($Kind, $Name, $Command) $entries.Add([pscustomobject]@{ Kind = $Kind; Name = "$Name"; Command = "$Command" }) }
+
+    $runKeys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+    'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+    'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+    'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run',
+    'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\RunOnce'
+    foreach ($key in $runKeys) {
+        if (-not (Test-Path -LiteralPath $key)) { continue }
+        try {
+            $item = Get-Item -LiteralPath $key -ErrorAction Stop
+            foreach ($valueName in $item.GetValueNames()) {
+                & $add 'Run key' "$($key -replace '^(HK..):.*\\(Run(Once)?)$', '$1 $2') / $valueName" $item.GetValue($valueName)
+            }
+        }
+        catch { $problems.Add("Run key ${key}: $($_.Exception.Message)") }
+    }
+
+    $shell = $null
+    try { $shell = New-Object -ComObject WScript.Shell } catch { $problems.Add('Shortcut targets could not be resolved') }
+    foreach ($folder in [Environment]::GetFolderPath('Startup'), [Environment]::GetFolderPath('CommonStartup')) {
+        if (-not $folder -or -not (Test-Path -LiteralPath $folder)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $folder -File -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'desktop.ini' })) {
+            $target = $file.FullName
+            if ($shell -and $file.Extension -eq '.lnk') {
+                # CreateShortcut only loads the .lnk here. It is never saved.
+                $link = $shell.CreateShortcut($file.FullName)
+                $target = "$($link.TargetPath) $($link.Arguments)".Trim()
+            }
+            & $add 'Startup folder' $file.Name $target
+        }
+    }
+
+    try {
+        foreach ($task in @(Get-ScheduledTask -ErrorAction Stop | Where-Object { $_.TaskPath -notlike '\Microsoft\*' -and "$($_.Author)" -notmatch '(?i)microsoft' })) {
+            $actions = @($task.Actions | ForEach-Object {
+                    if ($_.PSObject.Properties['Execute'] -and $_.Execute) { "$($_.Execute) $($_.Arguments)".Trim() } else { 'COM handler' }
+                }) -join ' ; '
+            & $add 'Scheduled task' "$($task.TaskPath)$($task.TaskName)" ([Environment]::ExpandEnvironmentVariables($actions))
+        }
+    }
+    catch { $problems.Add("Scheduled tasks: $($_.Exception.Message)") }
+
+    try {
+        foreach ($service in @(Get-CimInstance -ClassName Win32_Service -ErrorAction Stop)) {
+            $binary = if ("$($service.PathName)" -match '^\s*"?([A-Za-z]:\\[^"]+?\.exe)') { $Matches[1] } else { $null }
+            $company = ''
+            if ($binary -and (Test-Path -LiteralPath $binary -PathType Leaf)) {
+                try { $company = "$((Get-Item -LiteralPath $binary -ErrorAction Stop).VersionInfo.CompanyName)" } catch { $company = '' }
+            }
+            if ($company -notmatch '(?i)microsoft') { & $add 'Service' "$($service.Name) [$($service.State)]" $service.PathName }
+        }
+    }
+    catch { $problems.Add("Services: $($_.Exception.Message)") }
+
+    try {
+        foreach ($consumer in @(Get-CimInstance -Namespace 'root/subscription' -ClassName __EventConsumer -ErrorAction Stop)) {
+            if ($consumer.Name -in 'SCM Event Log Consumer', 'BVTConsumer') { continue }
+            $detail = foreach ($property in 'CommandLineTemplate', 'ScriptText', 'ScriptFileName') {
+                if ($consumer.CimInstanceProperties[$property] -and $consumer.$property) { $consumer.$property }
+            }
+            & $add 'WMI subscription' $consumer.Name "$($consumer.CimClass.CimClassName): $($detail -join ' ')"
+        }
+    }
+    catch { $problems.Add("WMI event subscriptions could not be read: $($_.Exception.Message.Trim())") }
+
+    $note = if ($problems.Count -gt 0) { "Incomplete, these sources could not be read: $($problems -join '; ')" } else { '' }
+    return [pscustomobject]@{
+        Entries = $entries.ToArray()
+        Section = New-Section -Title 'Persistence' -Note $note -Rows $entries.ToArray()
+    }
+}
+
+Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData
