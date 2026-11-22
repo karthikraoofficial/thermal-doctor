@@ -22,11 +22,14 @@ Write-Host 'Reading persistence...'
 $persistence = Get-PersistenceData
 Write-Host 'Reading network connections...'
 $network = Get-NetworkData -Processes $processes
+Write-Host 'Reading Defender and system context...'
+$defenderSections = @(Get-DefenderSections)
+$contextSections = @(Get-ContextSections)
 $snapshot = [pscustomobject]@{
     Processes   = $processes
     Persistence = @($persistence.Entries)
     Connections = @($network.Connections)
-    Sections    = @($gpuSection, $temperatureSection, $persistence.Section, $network.Section)
+    Sections    = @(@($gpuSection, $temperatureSection, $persistence.Section, $network.Section) + $defenderSections + $contextSections)
 }
 
 $flags = @(Get-RedFlags -Snapshot $snapshot)

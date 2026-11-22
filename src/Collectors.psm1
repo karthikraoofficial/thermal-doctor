@@ -322,4 +322,89 @@ function Get-NetworkData {
     }
 }
 
-Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData
+function Get-DefenderSections {
+    [CmdletBinding()]
+    param()
+
+    $defenderActive = $false
+    try {
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        $defenderActive = [bool]$status.AntivirusEnabled -and "$($status.AMRunningMode)" -ne 'Not running'
+        $fields = 'AMRunningMode', 'AntivirusEnabled', 'RealTimeProtectionEnabled', 'BehaviorMonitorEnabled', 'IsTamperProtected',
+        'AntivirusSignatureLastUpdated', 'QuickScanEndTime', 'FullScanEndTime'
+        $rows = foreach ($field in $fields) {
+            if ($status.PSObject.Properties[$field]) { [pscustomobject]@{ Setting = $field; Value = "$($status.$field)" } }
+        }
+        New-Section -Title 'Defender status' -Rows @($rows)
+    }
+    catch { New-Section -Title 'Defender status' -Status 'Unavailable' -Note "Defender status could not be read: $($_.Exception.Message.Trim())" }
+
+    try {
+        $detections = @(Get-MpThreatDetection -ErrorAction Stop | Sort-Object -Property InitialDetectionTime -Descending | ForEach-Object {
+                [pscustomobject]@{
+                    Detected  = "$($_.InitialDetectionTime)"
+                    ThreatId  = $_.ThreatID
+                    Process   = $_.ProcessName
+                    Resources = (@($_.Resources) -join '; ')
+                    Succeeded = $_.ActionSuccess
+                }
+            })
+        $note = if ($detections.Count -gt 0) { '' }
+        elseif ($defenderActive) { 'Defender has no recorded threat detections.' }
+        else { 'Defender is not actively scanning, so an empty history is not evidence that this PC is clean. Check the history of the antivirus product in use.' }
+        New-Section -Title 'Defender threat history' -Rows $detections -Note $note
+    }
+    catch { New-Section -Title 'Defender threat history' -Status 'Unavailable' -Note "Threat history could not be read: $($_.Exception.Message.Trim())" }
+}
+
+function Get-StartupImpactSection {
+    [CmdletBinding()]
+    param()
+
+    $directory = Join-Path $env:SystemRoot 'System32\wdi\LogFiles\StartupInfo'
+    try {
+        $files = @(Get-ChildItem -LiteralPath $directory -Filter '*.xml' -ErrorAction Stop)
+        $totals = @{}
+        foreach ($file in $files) {
+            [xml] $document = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop
+            foreach ($process in @($document.SelectNodes('//Process'))) {
+                $name = Split-Path -Leaf "$($process.GetAttribute('Name'))"
+                if (-not $name) { continue }
+                if (-not $totals.ContainsKey($name)) { $totals[$name] = @{ Cpu = 0.0; Disk = 0.0 } }
+                $cpuNode = $process.SelectSingleNode('CpuUsage')
+                $diskNode = $process.SelectSingleNode('DiskUsage')
+                if ($cpuNode) { $totals[$name].Cpu += [double]$cpuNode.InnerText }
+                if ($diskNode) { $totals[$name].Disk += [double]$diskNode.InnerText }
+            }
+        }
+        $rows = @($totals.Keys | ForEach-Object { [pscustomobject]@{ App = $_; CpuUsage = $totals[$_].Cpu; DiskUsage = $totals[$_].Disk } } |
+            Sort-Object -Property CpuUsage, DiskUsage -Descending | Select-Object -First 10)
+        if ($rows.Count -eq 0) { return New-Section -Title 'Top startup-impact apps' -Status 'Unavailable' -Note 'Windows has not recorded startup-impact data.' }
+        return New-Section -Title 'Top startup-impact apps' -Rows $rows -Note 'Totals across the boot records Windows keeps.'
+    }
+    catch {
+        return New-Section -Title 'Top startup-impact apps' -Status 'Unavailable' -Note "Startup-impact data could not be read: $($_.Exception.Message.Trim())"
+    }
+}
+
+function Get-ContextSections {
+    [CmdletBinding()]
+    param()
+
+    $rows = New-Object System.Collections.Generic.List[object]
+    $plan = (& powercfg.exe /getactivescheme) -join ' '
+    $planName = if ($plan -match '\(([^)]+)\)') { $Matches[1] } else { 'unavailable' }
+    $rows.Add([pscustomobject]@{ Item = 'Power plan'; Value = $planName })
+
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        $uptime = (Get-Date) - $os.LastBootUpTime
+        $rows.Add([pscustomobject]@{ Item = 'Uptime'; Value = ('{0}d {1}h {2}m' -f $uptime.Days, $uptime.Hours, $uptime.Minutes) })
+    }
+    catch { $rows.Add([pscustomobject]@{ Item = 'Uptime'; Value = 'unavailable' }) }
+
+    New-Section -Title 'System context' -Rows $rows.ToArray()
+    Get-StartupImpactSection
+}
+
+Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData, Get-DefenderSections, Get-ContextSections
