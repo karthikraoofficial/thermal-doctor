@@ -1,0 +1,26 @@
+{
+  "Processes": [
+    {
+      "Name": "xmrig",
+      "Pid": 4242,
+      "Path": "C:\\Users\\demo\\AppData\\Local\\Temp\\xmrig.exe",
+      "CommandLine": "xmrig.exe -o pool.example.test:3333",
+      "ParentName": "explorer",
+      "CpuPercent": 62.5,
+      "Signature": "NotSigned",
+      "Company": "",
+      "Sha256": "0000000000000000000000000000000000000000000000000000000000000001"
+    },
+    {
+      "Name": "notepad",
+      "Pid": 1001,
+      "Path": "C:\\Windows\\System32\\notepad.exe",
+      "CommandLine": "notepad.exe",
+      "ParentName": "explorer",
+      "CpuPercent": 0.5,
+      "Signature": "Valid",
+      "Company": "Example Publisher",
+      "Sha256": "0000000000000000000000000000000000000000000000000000000000000002"
+    }
+  ]
+}
