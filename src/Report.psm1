@@ -7,6 +7,19 @@ function ConvertTo-MarkdownCell {
     return ("$Value" -replace '\|', '\|' -replace '\r?\n', ' ')
 }
 
+function Add-MarkdownTable {
+    param($Lines, [object[]] $Rows)
+
+    if ($Rows.Count -eq 0) { return }
+    $columns = @($Rows[0].PSObject.Properties.Name)
+    $Lines.Add('| ' + ($columns -join ' | ') + ' |')
+    $Lines.Add('| ' + (($columns | ForEach-Object { '---' }) -join ' | ') + ' |')
+    foreach ($row in $Rows) {
+        $cells = foreach ($column in $columns) { ConvertTo-MarkdownCell $row.$column }
+        $Lines.Add('| ' + ($cells -join ' | ') + ' |')
+    }
+}
+
 function ConvertTo-ThermalReport {
     [CmdletBinding()]
     param(
@@ -51,9 +64,30 @@ function ConvertTo-ThermalReport {
     $lines.Add('')
     $lines.Add('## Raw data')
     $lines.Add('')
-    $lines.Add('```json')
-    $lines.Add(($Snapshot | ConvertTo-Json -Depth 6))
-    $lines.Add('```')
+    $lines.Add('### CPU: top 15 process details')
+    $lines.Add('')
+    Add-MarkdownTable -Lines $lines -Rows @($hottest | Select-Object Name, Pid, CpuPercent, ParentName, Signature, Company, Path, CommandLine)
+    $lines.Add('')
+
+    $sections = $Snapshot.PSObject.Properties['Sections']
+    if ($sections) {
+        foreach ($section in @($sections.Value)) {
+            $lines.Add("### $($section.Title)")
+            $lines.Add('')
+            if ($section.Note) {
+                $lines.Add($section.Note)
+                $lines.Add('')
+            }
+            if (@($section.Rows).Count -gt 0) {
+                Add-MarkdownTable -Lines $lines -Rows @($section.Rows)
+                $lines.Add('')
+            }
+            elseif (-not $section.Note) {
+                $lines.Add('None found.')
+                $lines.Add('')
+            }
+        }
+    }
 
     return ($lines -join "`n")
 }

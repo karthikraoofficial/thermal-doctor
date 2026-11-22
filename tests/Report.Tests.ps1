@@ -34,6 +34,29 @@ Describe 'ConvertTo-ThermalReport' {
         $report | Should Match '0000000000000000000000000000000000000000000000000000000000000004'
     }
 
+    Context 'raw sections' {
+        $sectioned = [pscustomobject]@{
+            Processes = @()
+            Sections  = @(
+                [pscustomobject]@{ Title = 'Temperatures'; Status = 'Unavailable'; Note = 'no sensor data (access denied)'; Rows = @() }
+                [pscustomobject]@{ Title = 'GPU'; Status = 'Ok'; Note = ''; Rows = @([pscustomobject]@{ Process = 'demo-render'; Pid = 77; GpuPercent = 41.5 }) }
+            )
+        }
+        $sectionReport = ConvertTo-ThermalReport -Snapshot $sectioned -Flags @()
+        $raw = $sectionReport.Substring($sectionReport.IndexOf('## Raw data'))
+
+        It 'states why an unavailable section has no data' {
+            $raw | Should Match '### Temperatures'
+            $raw | Should Match 'no sensor data \(access denied\)'
+        }
+
+        It 'renders section rows as a table with their column names' {
+            $raw | Should Match '### GPU'
+            $raw | Should Match '\| Process \| Pid \| GpuPercent \|'
+            $raw | Should Match '\| demo-render \| 77 \| 41\.5 \|'
+        }
+    }
+
     It 'lists the hottest process first in Top heat contributors' {
         $section = $report.Substring($report.IndexOf('## Top heat contributors'))
 

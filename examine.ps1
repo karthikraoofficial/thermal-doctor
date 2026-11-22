@@ -14,8 +14,12 @@ Import-Module (Join-Path $PSScriptRoot 'src\Report.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'src\Collectors.psm1') -Force
 
 Write-Host "Sampling CPU for $SampleSeconds seconds..."
+$processes = @(Get-ProcessSnapshot -SampleSeconds $SampleSeconds)
+Write-Host 'Reading GPU and temperatures...'
+$sections = @(Get-GpuSection; Get-TemperatureSection)
 $snapshot = [pscustomobject]@{
-    Processes = @(Get-ProcessSnapshot -SampleSeconds $SampleSeconds)
+    Processes = $processes
+    Sections  = $sections
 }
 
 $flags = @(Get-RedFlags -Snapshot $snapshot)

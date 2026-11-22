@@ -106,4 +106,96 @@ function Add-FlagHashes {
     return $Flags
 }
 
-Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes
+function New-Section {
+    param([string] $Title, [string] $Note = '', [object[]] $Rows = @(), [string] $Status = 'Ok')
+
+    [pscustomobject]@{ Title = $Title; Status = $Status; Note = $Note; Rows = @($Rows) }
+}
+
+function Get-GpuSection {
+    [CmdletBinding()]
+    param([int] $Samples = 5)
+
+    try {
+        $sets = @(Get-Counter -Counter '\GPU Engine(*)\Utilization Percentage' -SampleInterval 2 -MaxSamples $Samples -ErrorAction Stop)
+    }
+    catch {
+        return New-Section -Title 'GPU' -Status 'Unavailable' -Note "GPU counters unavailable: $($_.Exception.Message)"
+    }
+
+    # Like Task Manager, a process's GPU load is its busiest engine type in each sample.
+    $totals = @{}
+    foreach ($set in $sets) {
+        $byEngine = @{}
+        foreach ($sample in $set.CounterSamples) {
+            if ($sample.InstanceName -notmatch '^pid_(\d+)_.*engtype_(.+)$') { continue }
+            $key = "$($Matches[1])|$($Matches[2])"
+            if (-not $byEngine.ContainsKey($key)) { $byEngine[$key] = 0.0 }
+            $byEngine[$key] += [double]$sample.CookedValue
+        }
+        $peak = @{}
+        foreach ($key in $byEngine.Keys) {
+            $id = [int]($key -split '\|')[0]
+            if (-not $peak.ContainsKey($id) -or $byEngine[$key] -gt $peak[$id]) { $peak[$id] = $byEngine[$key] }
+        }
+        foreach ($id in $peak.Keys) {
+            if (-not $totals.ContainsKey($id)) { $totals[$id] = 0.0 }
+            $totals[$id] += $peak[$id]
+        }
+    }
+
+    $rows = foreach ($id in $totals.Keys) {
+        $average = [math]::Round($totals[$id] / $sets.Count, 2)
+        if ($average -le 0) { continue }
+        $process = Get-Process -Id $id -ErrorAction SilentlyContinue
+        [pscustomobject]@{ Process = if ($process) { $process.ProcessName } else { 'exited' }; Pid = $id; GpuPercent = $average }
+    }
+    $top = @($rows | Sort-Object -Property GpuPercent -Descending | Select-Object -First 15)
+    $note = if ($top.Count -eq 0) { 'No process used the GPU during the sample.' } else { '' }
+    return New-Section -Title 'GPU' -Rows $top -Note $note
+}
+
+function Get-TemperatureReading {
+    [CmdletBinding()]
+    param()
+
+    $problems = New-Object System.Collections.Generic.List[string]
+    try {
+        $sensors = @(Get-CimInstance -Namespace 'root/LibreHardwareMonitor' -ClassName Sensor -Filter "SensorType='Temperature'" -ErrorAction Stop)
+        if ($sensors.Count -gt 0) {
+            $rows = @($sensors | ForEach-Object { [pscustomobject]@{ Sensor = $_.Name; Celsius = [math]::Round([double]$_.Value, 1) } })
+            $cpu = @($sensors | Where-Object { $_.Identifier -match '(?i)cpu' -and $_.Name -match '(?i)package|tctl|tdie' } | Select-Object -First 1)
+            if ($cpu.Count -eq 0) { $cpu = @($sensors | Where-Object { $_.Identifier -match '(?i)cpu' } | Select-Object -First 1) }
+            $cpuCelsius = if ($cpu.Count -gt 0) { [math]::Round([double]$cpu[0].Value, 1) } else { $null }
+            return [pscustomobject]@{ Source = 'LibreHardwareMonitor'; CpuCelsius = $cpuCelsius; Rows = $rows; Note = 'Source: LibreHardwareMonitor.' }
+        }
+        $problems.Add('LibreHardwareMonitor returned no temperature sensors')
+    }
+    catch { $problems.Add('LibreHardwareMonitor is not available') }
+
+    try {
+        $zones = @(Get-CimInstance -Namespace 'root/wmi' -ClassName MSAcpi_ThermalZoneTemperature -ErrorAction Stop)
+        if ($zones.Count -gt 0) {
+            $rows = @($zones | ForEach-Object {
+                    [pscustomobject]@{ Sensor = $_.InstanceName; Celsius = [math]::Round(([double]$_.CurrentTemperature / 10) - 273.15, 1) }
+                })
+            $hottest = ($rows | Measure-Object -Property Celsius -Maximum).Maximum
+            return [pscustomobject]@{ Source = 'ACPI'; CpuCelsius = $hottest; Rows = $rows; Note = 'Source: ACPI thermal zone, which is a motherboard reading and may not reflect the CPU die.' }
+        }
+        $problems.Add('ACPI returned no thermal zones')
+    }
+    catch { $problems.Add("ACPI thermal zone: $($_.Exception.Message.Trim())") }
+
+    return [pscustomobject]@{ Source = 'None'; CpuCelsius = $null; Rows = @(); Note = "no sensor data ($($problems -join '; '))" }
+}
+
+function Get-TemperatureSection {
+    [CmdletBinding()]
+    param()
+
+    $reading = Get-TemperatureReading
+    $status = if ($reading.Source -eq 'None') { 'Unavailable' } else { 'Ok' }
+    return New-Section -Title 'Temperatures' -Status $status -Note $reading.Note -Rows @($reading.Rows)
+}
+
+Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection
