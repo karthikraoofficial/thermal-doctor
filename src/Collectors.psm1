@@ -278,4 +278,48 @@ function Get-PersistenceData {
     }
 }
 
-Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData
+function Get-NetworkData {
+    [CmdletBinding()]
+    param([object[]] $Processes = @())
+
+    $processById = @{}
+    foreach ($process in $Processes) { $processById[[int]$process.Pid] = $process }
+
+    # Names come from the local DNS cache so that the scan generates no network traffic.
+    $hostByAddress = @{}
+    $notes = New-Object System.Collections.Generic.List[string]
+    try {
+        foreach ($record in @(Get-DnsClientCache -ErrorAction Stop)) {
+            if ($record.Data -and -not $hostByAddress.ContainsKey("$($record.Data)")) { $hostByAddress["$($record.Data)"] = "$($record.Entry)" }
+        }
+        $notes.Add('Host names come from the local DNS cache, so a blank host means the name was not cached.')
+    }
+    catch { $notes.Add("DNS cache could not be read: $($_.Exception.Message.Trim())") }
+
+    try {
+        $connections = @(Get-NetTCPConnection -State Established -ErrorAction Stop | ForEach-Object {
+                $owner = if ($processById.ContainsKey([int]$_.OwningProcess)) { $processById[[int]$_.OwningProcess] } else { $null }
+                [pscustomobject]@{
+                    ProcessName   = if ($owner) { $owner.Name } else { 'unknown' }
+                    Pid           = [int]$_.OwningProcess
+                    RemoteAddress = $_.RemoteAddress
+                    RemotePort    = [int]$_.RemotePort
+                    RemoteHost    = if ($hostByAddress.ContainsKey("$($_.RemoteAddress)")) { $hostByAddress["$($_.RemoteAddress)"] } else { '' }
+                    Path          = if ($owner) { $owner.Path } else { $null }
+                }
+            })
+    }
+    catch {
+        return [pscustomobject]@{
+            Connections = @()
+            Section     = New-Section -Title 'Network' -Status 'Unavailable' -Note "TCP connections could not be read: $($_.Exception.Message.Trim())"
+        }
+    }
+
+    return [pscustomobject]@{
+        Connections = $connections
+        Section     = New-Section -Title 'Network' -Note ($notes -join ' ') -Rows $connections
+    }
+}
+
+Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData

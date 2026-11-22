@@ -20,10 +20,13 @@ $gpuSection = Get-GpuSection
 $temperatureSection = Get-TemperatureSection
 Write-Host 'Reading persistence...'
 $persistence = Get-PersistenceData
+Write-Host 'Reading network connections...'
+$network = Get-NetworkData -Processes $processes
 $snapshot = [pscustomobject]@{
     Processes   = $processes
     Persistence = @($persistence.Entries)
-    Sections    = @($gpuSection, $temperatureSection, $persistence.Section)
+    Connections = @($network.Connections)
+    Sections    = @($gpuSection, $temperatureSection, $persistence.Section, $network.Section)
 }
 
 $flags = @(Get-RedFlags -Snapshot $snapshot)

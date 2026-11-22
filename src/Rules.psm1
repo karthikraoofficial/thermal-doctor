@@ -5,6 +5,7 @@ $script:KnownMiners = @('xmrig', 'nicehash', 'phoenixminer', 't-rex', 'lolminer'
 $script:UserWritablePathPattern = '(?i)\\(AppData|Temp|ProgramData|Users\\Public)\\'
 
 $script:SystemProcessNames = @('svchost', 'csrss', 'lsass', 'conhost', 'dllhost')
+$script:MiningPorts = @(3333, 4444, 5555, 7777, 8888, 14444, 45700)
 
 # PowerShell accepts abbreviated parameters, so -e, -ec, -enc and -w are all live forms.
 $script:EncodedCommandPattern = '(?i)(^|\s)[-/](e|ec|en[a-z]*)\s+\S'
@@ -54,9 +55,36 @@ function Get-PersistenceFlags {
     }
 }
 
+function Get-ConnectionFlags {
+    param($Connection)
+
+    $address = "$($Connection.RemoteAddress)"
+    if ($address -match '^(127\.|::1$|::ffff:127\.)') { return }
+
+    $subject = [pscustomobject]@{ Name = $Connection.ProcessName; Pid = $Connection.Pid; Path = $Connection.Path; Sha256 = $null }
+    $endpoint = "${address}:$($Connection.RemotePort)"
+
+    if ($script:MiningPorts -contains [int]$Connection.RemotePort) {
+        New-RedFlag -Severity 'Medium' -Rule 'MiningPort' -Process $subject -Reason "Connected to $endpoint, a port commonly used by miners or remote shells"
+    }
+
+    $remoteHost = "$($Connection.RemoteHost)".ToLowerInvariant()
+    if ($remoteHost -match '(xmr|nicehash)') {
+        New-RedFlag -Severity 'High' -Rule 'MiningHost' -Process $subject -Reason "Connected to '$remoteHost' ($endpoint), which contains '$($Matches[1])'"
+    }
+    elseif ($remoteHost -match '(pool|mine)') {
+        New-RedFlag -Severity 'Medium' -Rule 'MiningHost' -Process $subject -Reason "Connected to '$remoteHost' ($endpoint), which contains '$($Matches[1])'"
+    }
+}
+
 function Get-RedFlags {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Snapshot)
+
+    $connections = $Snapshot.PSObject.Properties['Connections']
+    if ($connections) {
+        foreach ($connection in @($connections.Value)) { Get-ConnectionFlags -Connection $connection }
+    }
 
     $persistence = $Snapshot.PSObject.Properties['Persistence']
     if ($persistence) {

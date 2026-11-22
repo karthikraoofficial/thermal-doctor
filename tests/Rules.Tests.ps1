@@ -191,6 +191,51 @@ Describe 'Get-RedFlags' {
         }
     }
 
+    Context 'network connections' {
+        function Get-NetworkFlags($Address, $Port, $HostName) {
+            $candidate = [pscustomobject]@{
+                Processes   = @()
+                Connections = @([pscustomobject]@{
+                    ProcessName = 'demo-net'; Pid = 6001; Path = 'C:\Program Files\Demo\net.exe'
+                    RemoteAddress = $Address; RemotePort = $Port; RemoteHost = $HostName
+                })
+            }
+            @(Get-RedFlags -Snapshot $candidate)
+        }
+
+        It 'flags remote port <port> as Medium' -TestCases @(
+            @{ port = 3333 }, @{ port = 4444 }, @{ port = 5555 }, @{ port = 7777 }, @{ port = 8888 }, @{ port = 14444 }, @{ port = 45700 }
+        ) {
+            param($port)
+            $flag = @(Get-NetworkFlags '203.0.113.10' $port '' | Where-Object { $_.Rule -eq 'MiningPort' })
+
+            $flag.Count | Should Be 1
+            $flag[0].Severity | Should Be 'Medium'
+        }
+
+        It 'does not flag an ordinary HTTPS connection' {
+            (Get-NetworkFlags '203.0.113.10' 443 'www.example.test').Count | Should Be 0
+        }
+
+        It 'does not flag a mining port on loopback' {
+            (Get-NetworkFlags '127.0.0.1' 8888 '').Count | Should Be 0
+            (Get-NetworkFlags '::1' 8888 '').Count | Should Be 0
+        }
+
+        It 'flags a host containing <hostName> as <severity>' -TestCases @(
+            @{ hostName = 'xmr.example.test'; severity = 'High' },
+            @{ hostName = 'eu.nicehash.example.test'; severity = 'High' },
+            @{ hostName = 'pool.example.test'; severity = 'Medium' },
+            @{ hostName = 'mine.example.test'; severity = 'Medium' }
+        ) {
+            param($hostName, $severity)
+            $flag = @(Get-NetworkFlags '203.0.113.10' 443 $hostName | Where-Object { $_.Rule -eq 'MiningHost' })
+
+            $flag.Count | Should Be 1
+            $flag[0].Severity | Should Be $severity
+        }
+    }
+
     It 'does not treat an ordinary Program Files path as user-writable' {
         $candidate = [pscustomobject]@{
             Processes = @([pscustomobject]@{
