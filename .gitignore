@@ -1,0 +1,17 @@
+# Machine-specific diagnostic output. This repo is public: never commit these.
+reports/
+logs/
+quarantine/
+*.csv
+
+# Local agent and editor state
+.scratch/
+.serena/
+.claude/settings.local.json
+.vscode/
+
+# Secrets and OS noise
+.env
+.env.*
+Thumbs.db
+Desktop.ini
