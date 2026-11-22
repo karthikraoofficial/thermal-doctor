@@ -98,8 +98,11 @@ function Add-FlagHashes {
     foreach ($flag in $Flags) {
         if (-not $flag.Path) { continue }
         if (-not $cache.ContainsKey($flag.Path)) {
-            try { $cache[$flag.Path] = (Get-FileHash -LiteralPath $flag.Path -Algorithm SHA256 -ErrorAction Stop).Hash }
-            catch { $cache[$flag.Path] = 'unavailable (file could not be read)' }
+            if (-not (Test-Path -LiteralPath $flag.Path -PathType Leaf)) { $cache[$flag.Path] = 'unavailable (file is missing)' }
+            else {
+                try { $cache[$flag.Path] = (Get-FileHash -LiteralPath $flag.Path -Algorithm SHA256 -ErrorAction Stop).Hash }
+                catch { $cache[$flag.Path] = 'unavailable (file could not be read)' }
+            }
         }
         $flag.Sha256 = $cache[$flag.Path]
     }
@@ -243,7 +246,23 @@ function Get-PersistenceData {
             $actions = @($task.Actions | ForEach-Object {
                     if ($_.PSObject.Properties['Execute'] -and $_.Execute) { "$($_.Execute) $($_.Arguments)".Trim() } else { 'COM handler' }
                 }) -join ' ; '
-            & $add 'Scheduled task' "$($task.TaskPath)$($task.TaskName)" ([Environment]::ExpandEnvironmentVariables($actions))
+            $expanded = [Environment]::ExpandEnvironmentVariables($actions)
+            $targetMissing = $false
+            $companions = @()
+            if ($expanded -match '^\s*"?([A-Za-z]:\\[^"]+?\.exe)') {
+                $target = $Matches[1]
+                if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
+                    $targetMissing = $true
+                    $folder = Split-Path -Parent $target
+                    if (Test-Path -LiteralPath $folder -PathType Container) {
+                        $companions = @(Get-ChildItem -LiteralPath $folder -Filter '*.exe' -File -Force -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+                    }
+                }
+            }
+            $entries.Add([pscustomobject]@{
+                    Kind = 'Scheduled task'; Name = "$($task.TaskPath)$($task.TaskName)"; Command = $expanded
+                    TargetMissing = $targetMissing; Companions = $companions
+                })
         }
     }
     catch { $problems.Add("Scheduled tasks: $($_.Exception.Message)") }
@@ -274,7 +293,7 @@ function Get-PersistenceData {
     $note = if ($problems.Count -gt 0) { "Incomplete, these sources could not be read: $($problems -join '; ')" } else { '' }
     return [pscustomobject]@{
         Entries = $entries.ToArray()
-        Section = New-Section -Title 'Persistence' -Note $note -Rows $entries.ToArray()
+        Section = New-Section -Title 'Persistence' -Note $note -Rows @($entries | Select-Object Kind, Name, Command)
     }
 }
 

@@ -8,8 +8,18 @@ $script:SystemProcessNames = @('svchost', 'csrss', 'lsass', 'conhost', 'dllhost'
 $script:MiningPorts = @(3333, 4444, 5555, 7777, 8888, 14444, 45700)
 
 # PowerShell accepts abbreviated parameters, so -e, -ec, -enc and -w are all live forms.
-$script:EncodedCommandPattern = '(?i)(^|\s)[-/](e|ec|en[a-z]*)\s+\S'
+$script:EncodedCommandPattern = '(?i)(^|\s)[-/](e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\s+\S'
 $script:HiddenWindowPattern = '(?i)(^|\s)[-/]w[a-z]*\s+["'']?hidden'
+# Everything after -Command or -File belongs to the script, not to powershell.exe.
+$script:ScriptArgumentPattern = '(?i)\s[-/](c|co|com|comm|comma|comman|command|f|fi|fil|file)(\s|$)'
+
+function Get-PowerShellHostArguments {
+    param([string] $CommandLine)
+
+    $match = [regex]::Match($CommandLine, $script:ScriptArgumentPattern)
+    if ($match.Success) { return $CommandLine.Substring(0, $match.Index) }
+    return $CommandLine
+}
 
 function New-RedFlag {
     param($Severity, $Rule, $Process, $Reason)
@@ -43,14 +53,28 @@ function Get-PersistenceFlags {
         New-RedFlag -Severity 'High' -Rule 'PersistenceMiner' -Process $subject -Reason "Starts automatically and matches known miner name '$miner'"
     }
 
-    if ($lowered -match '(powershell|pwsh)' -and ($command -match $script:EncodedCommandPattern -or $command -match $script:HiddenWindowPattern)) {
+    $hostArguments = Get-PowerShellHostArguments -CommandLine $command
+    if ($lowered -match '(powershell|pwsh)' -and ($hostArguments -match $script:EncodedCommandPattern -or $hostArguments -match $script:HiddenWindowPattern)) {
         New-RedFlag -Severity 'High' -Rule 'PersistencePowerShell' -Process $subject -Reason 'Starts PowerShell automatically with an encoded command or hidden window'
     }
 
-    if ($command -match '(?i)\\(Temp|Users\\Public)\\') {
+    $targetMissing = $Entry.PSObject.Properties['TargetMissing'] -and $Entry.TargetMissing
+    if ($targetMissing -and $executable -match $script:UserWritablePathPattern) {
+        New-RedFlag -Severity 'High' -Rule 'OrphanedTask' -Process $subject -Reason 'Scheduled task points to a missing executable in a user-writable location, a common remnant of removed malware'
+        if ($Entry.PSObject.Properties['Companions']) {
+            foreach ($companion in @($Entry.Companions)) {
+                $companionSubject = [pscustomobject]@{ Name = (Split-Path -Leaf $companion); Pid = $null; Path = $companion; Sha256 = $null }
+                New-RedFlag -Severity 'High' -Rule 'OrphanedTaskCompanion' -Process $companionSubject -Reason "Executable left in the folder of orphaned task '$($Entry.Name)'"
+            }
+        }
+        return
+    }
+
+    $launchTarget = if ($executable) { $executable } else { $command }
+    if ($launchTarget -match '(?i)\\(Temp|Users\\Public)\\') {
         New-RedFlag -Severity 'Medium' -Rule 'PersistenceRiskyPath' -Process $subject -Reason "Starts automatically from '$($Matches[1])'"
     }
-    elseif ($command -match '(?i)\\(AppData|ProgramData)\\') {
+    elseif ($launchTarget -match '(?i)\\(AppData|ProgramData)\\') {
         New-RedFlag -Severity 'Low' -Rule 'PersistenceRiskyPath' -Process $subject -Reason "Starts automatically from '$($Matches[1])', where many apps legitimately install"
     }
 }
@@ -81,6 +105,28 @@ function Get-RedFlags {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Snapshot)
 
+    $flags = @(Get-UngroupedFlags -Snapshot $Snapshot)
+    $seen = @{}
+    $grouped = New-Object System.Collections.Generic.List[object]
+    foreach ($flag in $flags) {
+        if ($null -eq $flag.Pid -or -not $flag.Path -or $flag.Rule -in 'MiningPort', 'MiningHost') {
+            $grouped.Add($flag)
+            continue
+        }
+        $key = "$($flag.Rule)|$($flag.Path.ToLowerInvariant())"
+        if ($seen.ContainsKey($key)) { $seen[$key].Count++; continue }
+        $seen[$key] = @{ Flag = $flag; Count = 1 }
+        $grouped.Add($flag)
+    }
+    foreach ($entry in $seen.Values) {
+        if ($entry.Count -gt 1) { $entry.Flag.Reason = "$($entry.Flag.Reason) ($($entry.Count) processes)" }
+    }
+    return $grouped.ToArray()
+}
+
+function Get-UngroupedFlags {
+    param($Snapshot)
+
     $connections = $Snapshot.PSObject.Properties['Connections']
     if ($connections) {
         foreach ($connection in @($connections.Value)) { Get-ConnectionFlags -Connection $connection }
@@ -109,7 +155,7 @@ function Get-RedFlags {
         }
 
         if ($baseName -match '(?i)^(powershell|pwsh)$') {
-            $commandLine = "$($process.CommandLine)"
+            $commandLine = Get-PowerShellHostArguments -CommandLine "$($process.CommandLine)"
             if ($commandLine -match $script:EncodedCommandPattern) {
                 New-RedFlag -Severity 'High' -Rule 'SuspiciousPowerShell' -Process $process -Reason 'PowerShell launched with an encoded command'
             }

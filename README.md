@@ -15,7 +15,9 @@ Requires Windows PowerShell 5.1. Tests use Pester 3.4.
 
 The scan takes a little over a minute. The report opens with **Red flags** ranked High, Medium and Low, then **Top heat contributors**, then the raw data.
 
-A red flag is a prompt to investigate, not proof of compromise. Developer tools and legitimate apps can match path and network rules.
+A red flag is a prompt to investigate, not proof of compromise. Developer tools and legitimate apps can match path and network rules. Repeated flags for one executable are collapsed into a single line with a process count.
+
+Scheduled tasks that point to a missing executable in a user-writable folder are ranked High, along with any executables left in that folder.
 
 ### Run as administrator for full coverage
 

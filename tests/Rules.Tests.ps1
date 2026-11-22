@@ -236,6 +236,61 @@ Describe 'Get-RedFlags' {
         }
     }
 
+    Context 'false positives and orphaned tasks' {
+        It 'does not mistake -Encoding inside a -Command script for an encoded command' {
+            $candidate = [pscustomobject]@{
+                Processes = @([pscustomobject]@{
+                    Name = 'powershell'; Pid = 7001; Path = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+                    CommandLine = 'powershell.exe -NoProfile -Command "Get-Content demo.txt -Encoding utf8"'
+                    ParentName = 'demo-parent'; CpuPercent = 0.1; Signature = 'Valid'; Company = 'Example Publisher'; Sha256 = $null
+                })
+            }
+
+            @(Get-RedFlags -Snapshot $candidate | Where-Object { $_.Rule -eq 'SuspiciousPowerShell' }).Count | Should Be 0
+        }
+
+        It 'judges a startup entry by its executable, not by paths in its arguments' {
+            $candidate = [pscustomobject]@{
+                Processes   = @()
+                Persistence = @([pscustomobject]@{ Kind = 'Scheduled task'; Name = 'demo'; Command = '"C:\Program Files\Demo\demo.exe" --data C:\ProgramData\Demo' })
+            }
+
+            @(Get-RedFlags -Snapshot $candidate).Count | Should Be 0
+        }
+
+        It 'flags a task whose user-writable executable is missing as High, along with executables left beside it' {
+            $candidate = [pscustomobject]@{
+                Processes   = @()
+                Persistence = @([pscustomobject]@{
+                    Kind = 'Scheduled task'; Name = '\Vendor\abcxyz'; Command = '"C:\Users\demo\AppData\Roaming\abc\host.exe" payload.dat'
+                    TargetMissing = $true; Companions = @('C:\Users\demo\AppData\Roaming\abc\dropper.exe')
+                })
+            }
+            $flags = @(Get-RedFlags -Snapshot $candidate)
+            $orphan = @($flags | Where-Object { $_.Rule -eq 'OrphanedTask' })
+            $companion = @($flags | Where-Object { $_.Rule -eq 'OrphanedTaskCompanion' })
+
+            $orphan.Count | Should Be 1
+            $orphan[0].Severity | Should Be 'High'
+            $companion.Count | Should Be 1
+            $companion[0].Severity | Should Be 'High'
+            $companion[0].Path | Should Be 'C:\Users\demo\AppData\Roaming\abc\dropper.exe'
+        }
+
+        It 'collapses repeated flags for one executable into a single flag with a count' {
+            $copies = 1..3 | ForEach-Object {
+                [pscustomobject]@{
+                    Name = 'demo-app'; Pid = 8000 + $_; Path = 'C:\Users\demo\AppData\Local\Demo\app.exe'; CommandLine = 'app.exe'
+                    ParentName = 'demo-parent'; CpuPercent = 0.1; Signature = 'Valid'; Company = 'Example Publisher'; Sha256 = $null
+                }
+            }
+            $flag = @(Get-RedFlags -Snapshot ([pscustomobject]@{ Processes = @($copies) }) | Where-Object { $_.Rule -eq 'UserWritablePath' })
+
+            $flag.Count | Should Be 1
+            $flag[0].Reason | Should Match '3 processes'
+        }
+    }
+
     It 'does not treat an ordinary Program Files path as user-writable' {
         $candidate = [pscustomobject]@{
             Processes = @([pscustomobject]@{

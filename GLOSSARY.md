@@ -18,6 +18,8 @@
 
 **User-writable path**: A location where ordinary programs can place executables: AppData, Temp, ProgramData or Users\Public.
 
+**Orphaned task**: A scheduled task whose executable in a user-writable path no longer exists. It is often what remains after malware is partly removed. Executables left in the same folder are flagged as its companions.
+
 **Unavailable**: A source that could not be read. It is never equivalent to a clean result.
 
 **Heat log**: The CSV of periodic samples written by the logger.
