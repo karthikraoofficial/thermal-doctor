@@ -407,4 +407,4 @@ function Get-ContextSections {
     Get-StartupImpactSection
 }
 
-Export-ModuleMember -Function Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData, Get-DefenderSections, Get-ContextSections
+Export-ModuleMember -Function Get-CpuByProcessId, Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData, Get-DefenderSections, Get-ContextSections
