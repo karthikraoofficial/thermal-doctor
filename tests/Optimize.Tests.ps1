@@ -15,7 +15,10 @@ function New-DemoState {
             [pscustomobject]@{ Label = 'Demo Guarded'; Name = 'DemoGuarded'; ApprovedKey = 'HKLM:\Software\Demo\Approved'; Found = $true; Command = 'C:\Tools\guarded-item.exe'; ApprovedHex = '020000000000000000000000'; Ask = $false }
             [pscustomobject]@{ Label = 'Demo Ask'; Name = 'DemoAsk'; ApprovedKey = 'HKLM:\Software\Demo\Approved'; Found = $true; Command = 'C:\Program Files\Demo\ask.exe'; ApprovedHex = $null; Ask = $true }
         )
+        TasksVerified = $true
         Tasks      = @(
+            [pscustomobject]@{ Label = 'Demo Hidden Task'; TaskPath = '\Demo\'; TaskName = 'Hidden Task'; Found = $false; Enabled = $false; Command = '' }
+            [pscustomobject]@{ Label = 'Demo Guarded Task'; TaskPath = '\Demo\'; TaskName = 'guarded-item'; Found = $false; Enabled = $false; Command = '' }
             [pscustomobject]@{ Label = 'Demo Task'; TaskPath = '\Demo\'; TaskName = 'Ready Task'; Found = $true; Enabled = $true; Command = 'C:\Program Files\Demo\task.exe' }
             [pscustomobject]@{ Label = 'Demo Off Task'; TaskPath = '\Demo\'; TaskName = 'Off Task'; Found = $true; Enabled = $false; Command = 'C:\Program Files\Demo\off.exe' }
             [pscustomobject]@{ Label = "Demo O'Brien Task"; TaskPath = '\Demo\'; TaskName = "O'Brien"; Found = $true; Enabled = $true; Command = 'C:\Program Files\Demo\quote.exe' }
@@ -63,6 +66,34 @@ Describe 'New-OptimizePlan' {
             (Get-Row $label).New | Should Be 'No change'
             (Get-Row $label).UndoText | Should Be 'Nothing to undo'
         }
+    }
+
+    Context 'when task state cannot be verified without elevation' {
+        $state = New-DemoState
+        $state.TasksVerified = $false
+        $unverified = @(New-OptimizePlan -State $state -Settings $settings -Now $now)
+        function Get-UnverifiedRow($label) { $unverified | Where-Object { $_.Label -eq $label } }
+
+        It 'reports a task that reads as missing as Unavailable' {
+            (Get-UnverifiedRow 'Demo Hidden Task').Status | Should Be 'Unavailable'
+            (Get-UnverifiedRow 'Demo Hidden Task').Current | Should Be 'Unavailable without Administrator'
+        }
+
+        It 'reports a task that reads as disabled as Unavailable' {
+            (Get-UnverifiedRow 'Demo Off Task').Status | Should Be 'Unavailable'
+        }
+
+        It 'still plans a task that reads as enabled' {
+            (Get-UnverifiedRow 'Demo Task').Status | Should Be 'Change'
+        }
+
+        It 'keeps protected tasks Protected' {
+            (Get-UnverifiedRow 'Demo Guarded Task').Status | Should Be 'Protected'
+        }
+    }
+
+    It 'reports a missing task as NotFound when elevated' {
+        (Get-Row 'Demo Hidden Task').Status | Should Be 'NotFound'
     }
 
     It 'plans only ready tasks for disabling' {

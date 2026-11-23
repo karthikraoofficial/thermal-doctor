@@ -90,6 +90,8 @@ Copy `optimize-targets.example.json` to `optimize-targets.json` and list your ta
 .\undo.ps1              # from an elevated PowerShell, reverses applied actions
 ```
 
+Without Administrator rights, Windows can hide scheduled tasks or report their state incorrectly. A preview from a normal shell therefore shows a task that looks missing or disabled as Unavailable. Preview from an elevated PowerShell for accurate task states.
+
 Outcomes go to `logs\actions.log`. An earlier `undo.ps1` is moved to `logs\` rather than overwritten. WSL limits take effect after `wsl --shutdown`, which stops running distros and Docker. Apps on the uninstall list are printed and never removed.
 
 The 99% processor cap stops turbo boost. On low-power laptop CPUs this can cut single-core speed sharply, so check that the machine still feels fast enough.

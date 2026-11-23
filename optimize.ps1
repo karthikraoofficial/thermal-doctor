@@ -26,12 +26,9 @@ if ($Apply -and $WhatIf) { throw 'Use either -Apply or -WhatIf, not both.' }
 if (-not (Test-Path -LiteralPath $TargetsPath)) {
     throw "Targets file not found: $TargetsPath. Copy optimize-targets.example.json to optimize-targets.json and edit it."
 }
-if ($Apply) {
-    $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw '-Apply requires an elevated PowerShell. Nothing was changed.'
-    }
-}
+$principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+$isElevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($Apply -and -not $isElevated) { throw '-Apply requires an elevated PowerShell. Nothing was changed.' }
 
 $targets = Get-Content -LiteralPath $TargetsPath -Raw | ConvertFrom-Json
 $now = Get-Date
@@ -116,6 +113,7 @@ $state = [pscustomobject]@{
     Wsl       = [pscustomobject]@{ Path = $wslPath; Exists = $wslExists; Content = $(if ($wslExists) { [IO.File]::ReadAllText($wslPath) } else { '' }) }
     RunValues = @(Read-RunValues)
     Startup   = @(Read-StartupItems)
+    TasksVerified = $isElevated
     Tasks     = @(Read-Tasks)
 }
 $settings = [pscustomobject]@{
@@ -130,6 +128,10 @@ $mode = if ($Apply) { 'APPLY' } else { 'WHATIF: nothing will be changed' }
 Write-Output "Thermal Doctor optimizer ($mode)"
 $plan | Select-Object Status, Label, Action, @{ n = 'Current state'; e = { $_.Current } }, @{ n = 'New state'; e = { $_.New } }, @{ n = 'How to undo'; e = { $_.UndoText } } |
     Format-Table -AutoSize | Out-String -Width 240 | Write-Output
+if (-not $isElevated) {
+    Write-Output 'Not elevated: some scheduled tasks cannot be read reliably. Re-run from an elevated PowerShell for accurate task states.'
+    Write-Output ''
+}
 
 $installed = @(Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
         ForEach-Object { if ($_.PSObject.Properties.Name -contains 'DisplayName') { $_.DisplayName } })

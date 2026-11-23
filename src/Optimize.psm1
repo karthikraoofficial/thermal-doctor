@@ -126,10 +126,14 @@ function New-OptimizePlan {
 
     foreach ($task in @($State.Tasks)) {
         $status = if (Test-OptimizeProtected -Text @($task.Label, "$($task.TaskPath)$($task.TaskName)", $task.Command) -Patterns $protected) { 'Protected' }
+        elseif (-not $State.TasksVerified -and -not ($task.Found -and $task.Enabled)) { 'Unavailable' }
         elseif (-not $task.Found) { 'NotFound' }
         elseif (-not $task.Enabled) { 'NoChange' }
         else { 'Change' }
-        $current = if (-not $task.Found) { 'Not present' } elseif ($task.Enabled) { 'Enabled' } else { 'Disabled' }
+        $current = if ($status -eq 'Unavailable') { 'Unavailable without Administrator' }
+        elseif (-not $task.Found) { 'Not present' }
+        elseif ($task.Enabled) { 'Enabled' }
+        else { 'Disabled' }
         New-PlanRow 'TaskDisable' $task.Label 'Disable scheduled task' $current 'Disabled' 'Enable-ScheduledTask' $status $task
     }
 }
