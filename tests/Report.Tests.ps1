@@ -30,6 +30,31 @@ Describe 'ConvertTo-ThermalReport' {
         $low | Should BeGreaterThan $medium
     }
 
+    It 'lists Info flags after Low' {
+        $withInfo = @($flags) + [pscustomobject]@{ Severity = 'Info'; Rule = 'ExampleInfo'; Name = 'demo-info'; Pid = 4; Path = 'C:\Users\demo\info.exe'; Sha256 = $null; Reason = 'Info reason' }
+        $infoReport = ConvertTo-ThermalReport -Snapshot $snapshot -Flags $withInfo
+
+        $infoReport.IndexOf('### Info') | Should BeGreaterThan $infoReport.IndexOf('Low reason')
+        $infoReport.IndexOf('Info reason') | Should BeGreaterThan $infoReport.IndexOf('### Info')
+    }
+
+    It 'shows triaged items under Previously triaged, not under a severity' {
+        $triaged = @([pscustomobject]@{ Title = 'Demo driver bug'; Note = 'Known vendor issue'; WouldBe = 'High'; Item = 'demo-host' })
+        $triagedReport = ConvertTo-ThermalReport -Snapshot $snapshot -Flags @() -Triaged $triaged
+        $section = $triagedReport.Substring($triagedReport.IndexOf('### Previously triaged'))
+
+        $section | Should Match 'Demo driver bug'
+        $section | Should Match 'Known vendor issue'
+        $triagedReport.IndexOf('### Previously triaged') | Should BeLessThan $triagedReport.IndexOf('## Top heat contributors')
+        $triagedReport | Should Not Match '### High'
+    }
+
+    It 'warns when the known-findings file could not be used' {
+        $warned = ConvertTo-ThermalReport -Snapshot $snapshot -Flags @() -TriageWarning 'known-findings.json could not be read'
+
+        $warned | Should Match 'known-findings.json could not be read'
+    }
+
     It 'includes the SHA256 of a flagged executable' {
         $report | Should Match '0000000000000000000000000000000000000000000000000000000000000004'
     }

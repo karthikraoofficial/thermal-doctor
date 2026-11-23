@@ -2,6 +2,8 @@ Set-StrictMode -Version 2.0
 
 # Every function in this module only reads system state.
 
+Import-Module (Join-Path $PSScriptRoot 'Rules.psm1')
+
 function Get-CpuByProcessId {
     [CmdletBinding()]
     param([int] $SampleSeconds = 60)
@@ -41,12 +43,13 @@ function Get-CpuByProcessId {
 function Get-SignatureInfo {
     param([string] $Path)
 
-    $info = @{ Signature = 'Unknown'; Company = '' }
+    $info = @{ Signature = 'Unknown'; Signer = ''; Company = '' }
     if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $info }
 
     try {
-        $status = (Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop).Status
-        $info.Signature = "$status"
+        $authenticode = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+        $info.Signature = "$($authenticode.Status)"
+        if ($authenticode.SignerCertificate) { $info.Signer = "$($authenticode.SignerCertificate.Subject)" }
     }
     catch { $info.Signature = 'Unknown' }
 
@@ -76,15 +79,22 @@ function Get-ProcessSnapshot {
             ParentName  = if ($nameById.ContainsKey($parentId)) { $nameById[$parentId] } else { "exited ($parentId)" }
             CpuPercent  = if ($cpu.ContainsKey($id)) { $cpu[$id] } else { 0.0 }
             Signature   = 'Unknown'
+            Signer      = ''
             Company     = ''
             Sha256      = $null
         }
     }
 
     $sorted = @($processes | Sort-Object -Property CpuPercent -Descending)
-    foreach ($process in @($sorted | Select-Object -First $IdentifyTop)) {
-        $signature = Get-SignatureInfo -Path $process.Path
+    # Path rules need the signature of every user-writable process, not only the hottest.
+    $toIdentify = @($sorted | Select-Object -First $IdentifyTop) + @($sorted | Select-Object -Skip $IdentifyTop | Where-Object { "$($_.Path)" -match '(?i)\\(AppData|Temp|ProgramData|Users\\Public)\\' })
+    $signatureByPath = @{}
+    foreach ($process in $toIdentify) {
+        $pathKey = "$($process.Path)".ToLowerInvariant()
+        if (-not $signatureByPath.ContainsKey($pathKey)) { $signatureByPath[$pathKey] = Get-SignatureInfo -Path $process.Path }
+        $signature = $signatureByPath[$pathKey]
         $process.Signature = $signature.Signature
+        $process.Signer = $signature.Signer
         $process.Company = $signature.Company
     }
     return $sorted
@@ -201,12 +211,80 @@ function Get-TemperatureSection {
     return New-Section -Title 'Temperatures' -Status $status -Note $reading.Note -Rows @($reading.Rows)
 }
 
+function Get-InstalledProducts {
+    $products = @{}
+    $roots = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall',
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+    foreach ($root in $roots) {
+        foreach ($key in @(Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue)) {
+            if ($key.PSChildName -notmatch '^\{[0-9A-Fa-f-]{36}\}$') { continue }
+            $products[$key.PSChildName.ToUpperInvariant()] = [pscustomobject]@{
+                DisplayName = "$($key.GetValue('DisplayName'))"
+                Publisher   = "$($key.GetValue('Publisher'))"
+                InstallDate = "$($key.GetValue('InstallDate'))"
+            }
+        }
+    }
+    return $products
+}
+
+function Get-AntivirusData {
+    [CmdletBinding()]
+    param()
+
+    $defenderActive = $null
+    try {
+        $status = Get-MpComputerStatus -ErrorAction Stop
+        $defenderActive = [bool]$status.AntivirusEnabled -and "$($status.AMRunningMode)" -ne 'Not running'
+    }
+    catch { $defenderActive = $null }
+
+    try {
+        $products = @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName AntiVirusProduct -ErrorAction Stop | ForEach-Object {
+                $decoded = ConvertFrom-AvProductState -ProductState ([int]$_.productState)
+                [pscustomobject]@{ Name = "$($_.displayName)"; State = $decoded.State; Definitions = $decoded.Definitions }
+            })
+    }
+    catch {
+        return [pscustomobject]@{
+            Available = $false; DefenderActive = $defenderActive; Products = @()
+            Section = New-Section -Title 'Antivirus products' -Status 'Unavailable' -Note "Security Center could not be read: $($_.Exception.Message.Trim())"
+        }
+    }
+
+    $active = @($products | Where-Object { $_.State -eq 'On' } | ForEach-Object { $_.Name })
+    $note = if ($products.Count -eq 0) { 'Security Center lists no antivirus products.' }
+    elseif ($active.Count -gt 0) { "Active antivirus: $($active -join ', ')." }
+    else { 'No registered antivirus reports itself as on.' }
+    return [pscustomobject]@{
+        Available = $true; DefenderActive = $defenderActive; Products = $products
+        Section = New-Section -Title 'Antivirus products' -Note $note -Rows $products
+    }
+}
+
+function Read-KnownFindings {
+    [CmdletBinding()]
+    param([string] $Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return [pscustomobject]@{ Findings = @(); Warning = '' } }
+    try {
+        $document = [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop
+        if (-not $document.PSObject.Properties['findings']) { throw "it has no 'findings' list" }
+        return [pscustomobject]@{ Findings = @($document.findings | ForEach-Object { $_ }); Warning = '' }
+    }
+    catch {
+        return [pscustomobject]@{ Findings = @(); Warning = "known-findings.json could not be read, so nothing was marked as triaged: $($_.Exception.Message.Trim())" }
+    }
+}
+
 function Get-PersistenceData {
     [CmdletBinding()]
     param()
 
     $entries = New-Object System.Collections.Generic.List[object]
     $problems = New-Object System.Collections.Generic.List[string]
+    $installedProducts = Get-InstalledProducts
     $add = { param($Kind, $Name, $Command) $entries.Add([pscustomobject]@{ Kind = $Kind; Name = "$Name"; Command = "$Command" }) }
 
     $runKeys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
@@ -236,6 +314,17 @@ function Get-PersistenceData {
                 # CreateShortcut only loads the .lnk here. It is never saved.
                 $link = $shell.CreateShortcut($file.FullName)
                 $target = "$($link.TargetPath) $($link.Arguments)".Trim()
+                $advertised = $null
+                try {
+                    if (Test-LnkHasDarwinId -Bytes ([IO.File]::ReadAllBytes($file.FullName))) {
+                        $advertised = Resolve-AdvertisedShortcut -Target "$($link.TargetPath)" -Products $installedProducts
+                    }
+                }
+                catch { $problems.Add("Shortcut $($file.Name): $($_.Exception.Message.Trim())") }
+                if ($advertised) {
+                    $entries.Add([pscustomobject]@{ Kind = 'Startup folder'; Name = $file.Name; Command = $advertised.Command; ProductCode = $advertised.ProductCode })
+                    continue
+                }
             }
             & $add 'Startup folder' $file.Name $target
         }
@@ -337,7 +426,7 @@ function Get-NetworkData {
 
     return [pscustomobject]@{
         Connections = $connections
-        Section     = New-Section -Title 'Network' -Note ($notes -join ' ') -Rows $connections
+        Section     = New-Section -Title 'Network' -Note ($notes -join ' ') -Rows @(Group-NetworkConnections -Connections $connections)
     }
 }
 
@@ -426,4 +515,4 @@ function Get-ContextSections {
     Get-StartupImpactSection
 }
 
-Export-ModuleMember -Function Get-CpuByProcessId, Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData, Get-DefenderSections, Get-ContextSections
+Export-ModuleMember -Function Get-CpuByProcessId, Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData, Get-AntivirusData, Read-KnownFindings, Get-DefenderSections, Get-ContextSections

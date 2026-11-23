@@ -1,0 +1,15 @@
+{
+  "Products": {
+    "{11111111-2222-4333-8444-555555555555}": { "DisplayName": "Demo Warranty App", "Publisher": "Example Publisher", "InstallDate": "20240102" },
+    "{AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE}": { "DisplayName": "Demo Sparse App", "Publisher": "", "InstallDate": "" }
+  },
+  "Cases": [
+    { "Case": "known product", "Target": "C:\\Windows\\Installer\\{11111111-2222-4333-8444-555555555555}\\_icon.exe", "ProductCode": "{11111111-2222-4333-8444-555555555555}", "Expected": "MSI advertised shortcut: Demo Warranty App, publisher Example Publisher, installed 2024-01-02, product {11111111-2222-4333-8444-555555555555}" },
+    { "Case": "lowercase GUID", "Target": "c:\\windows\\installer\\{aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}\\_icon.exe", "ProductCode": "{AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE}", "Expected": "MSI advertised shortcut: Demo Sparse App, publisher unknown publisher, installed unknown date, product {AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE}" },
+    { "Case": "product missing from Uninstall keys", "Target": "C:\\Windows\\Installer\\{99999999-2222-4333-8444-555555555555}\\_icon.exe", "ProductCode": "{99999999-2222-4333-8444-555555555555}", "Expected": "MSI advertised shortcut: product {99999999-2222-4333-8444-555555555555} is not in the Uninstall registry keys" }
+  ],
+  "NotAdvertisedTargets": [
+    "C:\\Users\\demo\\AppData\\Local\\Windows\\Installer\\{11111111-2222-4333-8444-555555555555}\\planted.exe",
+    "C:\\Program Files\\Demo\\demo.exe"
+  ]
+}

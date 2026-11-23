@@ -24,7 +24,9 @@ function ConvertTo-ThermalReport {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] $Snapshot,
-        [AllowEmptyCollection()] [object[]] $Flags = @()
+        [AllowEmptyCollection()] [object[]] $Flags = @(),
+        [AllowEmptyCollection()] [object[]] $Triaged = @(),
+        [string] $TriageWarning = ''
     )
 
     $lines = New-Object System.Collections.Generic.List[string]
@@ -36,7 +38,7 @@ function ConvertTo-ThermalReport {
     if ($Flags.Count -eq 0) {
         $lines.Add('No red flags were raised.')
     }
-    foreach ($severity in 'High', 'Medium', 'Low') {
+    foreach ($severity in 'High', 'Medium', 'Low', 'Info') {
         $matching = @($Flags | Where-Object { $_.Severity -eq $severity })
         if ($matching.Count -eq 0) { continue }
 
@@ -47,6 +49,21 @@ function ConvertTo-ThermalReport {
             $processId = if ($null -ne $flag.Pid) { " (PID $($flag.Pid))" } else { '' }
             $location = if ($flag.Path) { " Path: ``$($flag.Path)``." } else { '' }
             $lines.Add("- **$($flag.Name)**${processId}: $($flag.Reason).$location$hash")
+        }
+        $lines.Add('')
+    }
+
+    if ($Flags.Count -eq 0) { $lines.Add('') }
+    if ($TriageWarning) {
+        $lines.Add("**Known findings warning:** $TriageWarning")
+        $lines.Add('')
+    }
+    if ($Triaged.Count -gt 0) {
+        $lines.Add('### Previously triaged')
+        $lines.Add('')
+        foreach ($item in $Triaged) {
+            $note = if ($item.Note) { ": $($item.Note)" } else { '' }
+            $lines.Add("- **$($item.Title)** (``$($item.Item)``, this scan: $($item.WouldBe))$note")
         }
         $lines.Add('')
     }

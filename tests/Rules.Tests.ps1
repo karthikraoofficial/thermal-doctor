@@ -291,6 +291,196 @@ Describe 'Get-RedFlags' {
         }
     }
 
+    Context 'trusted AppData processes and tool caches' {
+        $cases = Get-Content (Join-Path $PSScriptRoot 'fixtures\appdata-processes.json') -Raw | ConvertFrom-Json |
+            ForEach-Object { $_ } | Select-Object *, @{ n = 'CommandLine'; e = { 'demo.exe' } }, @{ n = 'Sha256'; e = { $null } }
+
+        foreach ($case in $cases) {
+            It "ranks $($case.Case) as $($case.Expected)" {
+                $flag = @(Get-RedFlags -Snapshot ([pscustomobject]@{ Processes = @($case) }) | Where-Object { $_.Rule -eq 'UserWritablePath' })
+
+                $flag.Count | Should Be 1
+                $flag[0].Severity | Should Be $case.Expected
+            }
+        }
+
+        It 'keeps a busy unsigned copy visible when an idle copy of the same file is Info' {
+            $idle = [pscustomobject]@{ Name = 'demo-tool'; Pid = 9201; Path = 'C:\Users\demo\AppData\Local\uv\cache\demo\tool.exe'; CommandLine = 'tool.exe'; CpuPercent = 0.1; Signature = 'NotSigned'; Signer = ''; Company = ''; Sha256 = $null }
+            $busy = [pscustomobject]@{ Name = 'demo-tool'; Pid = 9202; Path = 'C:\Users\demo\AppData\Local\uv\cache\demo\tool.exe'; CommandLine = 'tool.exe'; CpuPercent = 40.0; Signature = 'NotSigned'; Signer = ''; Company = ''; Sha256 = $null }
+            $flags = @(Get-RedFlags -Snapshot ([pscustomobject]@{ Processes = @($idle, $busy) }) | Where-Object { $_.Rule -eq 'UserWritablePath' })
+
+            @($flags | Where-Object { $_.Severity -eq 'Medium' }).Count | Should Be 1
+        }
+
+        It 'still ranks a known miner in a uv cache as High' {
+            $miner = [pscustomobject]@{ Name = 'xmrig'; Pid = 9203; Path = 'C:\Users\demo\AppData\Local\uv\cache\demo\xmrig.exe'; CommandLine = 'xmrig.exe'; CpuPercent = 0.1; Signature = 'NotSigned'; Signer = ''; Company = ''; Sha256 = $null }
+
+            @(Get-RedFlags -Snapshot ([pscustomobject]@{ Processes = @($miner) }) | Where-Object { $_.Rule -eq 'KnownMiner' -and $_.Severity -eq 'High' }).Count | Should Be 1
+        }
+    }
+
+    Context 'browsers launched at raw hosts' {
+        $launches = Get-Content (Join-Path $PSScriptRoot 'fixtures\browser-launches.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ }
+
+        foreach ($launch in $launches) {
+            It "handles $($launch.Case)" {
+                $process = [pscustomobject]@{
+                    Name = $launch.Name; Pid = 9301; Path = 'C:\Program Files\Demo\browser.exe'; CommandLine = $launch.CommandLine
+                    CpuPercent = 0.1; Signature = 'Valid'; Signer = ''; Company = ''; Sha256 = $null
+                }
+                $flag = @(Get-RedFlags -Snapshot ([pscustomobject]@{ Processes = @($process) }) | Where-Object { $_.Rule -eq 'BrowserRawHost' })
+
+                if ($launch.Flagged) {
+                    $flag.Count | Should Be 1
+                    $flag[0].Severity | Should Be 'Medium'
+                    $flag[0].Reason | Should Match ([regex]::Escape($launch.Host))
+                }
+                else { $flag.Count | Should Be 0 }
+            }
+        }
+    }
+
+    Context 'MSI advertised shortcuts' {
+        $fixture = Get-Content (Join-Path $PSScriptRoot 'fixtures\msi-shortcuts.json') -Raw | ConvertFrom-Json
+        $products = @{}
+        foreach ($property in $fixture.Products.PSObject.Properties) { $products[$property.Name] = $property.Value }
+
+        foreach ($case in @($fixture.Cases | ForEach-Object { $_ })) {
+            It "describes $($case.Case)" {
+                $resolved = Resolve-AdvertisedShortcut -Target $case.Target -Products $products
+
+                $resolved.ProductCode | Should Be $case.ProductCode
+                $resolved.Command | Should Be $case.Expected
+            }
+        }
+
+        It 'does not treat a lookalike or ordinary path as advertised' {
+            foreach ($target in @($fixture.NotAdvertisedTargets | ForEach-Object { $_ })) {
+                Resolve-AdvertisedShortcut -Target $target -Products $products | Should BeNullOrEmpty
+            }
+        }
+
+        It 'reads the advertised marker from the shortcut header' {
+            $advertised = New-Object byte[] 76
+            $advertised[0] = 0x4C
+            $advertised[0x15] = 0x10
+            $plain = New-Object byte[] 76
+            $plain[0] = 0x4C
+
+            Test-LnkHasDarwinId -Bytes $advertised | Should Be $true
+            Test-LnkHasDarwinId -Bytes $plain | Should Be $false
+            Test-LnkHasDarwinId -Bytes (New-Object byte[] 8) | Should Be $false
+        }
+    }
+
+    Context 'antivirus coverage' {
+        function Get-AntivirusFlags($DefenderActive, $Available, $Products) {
+            $candidate = [pscustomobject]@{
+                Processes = @()
+                Antivirus = [pscustomobject]@{ DefenderActive = $DefenderActive; Available = $Available; Products = @($Products) }
+            }
+            @(Get-RedFlags -Snapshot $candidate | Where-Object { $_.Rule -eq 'DefenderOff' })
+        }
+        $defender = [pscustomobject]@{ Name = 'Windows Defender'; State = 'Off'; Definitions = 'Up to date' }
+        $other = [pscustomobject]@{ Name = 'Demo Antivirus'; State = 'On'; Definitions = 'Up to date' }
+
+        It 'decodes product state <state> as <expected>' -TestCases @(
+            @{ state = 0x041000; expected = 'On'; definitions = 'Up to date' },
+            @{ state = 0x060100; expected = 'Off'; definitions = 'Up to date' },
+            @{ state = 0x041010; expected = 'On'; definitions = 'Out of date' },
+            @{ state = 0x042000; expected = 'Snoozed'; definitions = 'Up to date' },
+            @{ state = 0x043000; expected = 'Expired'; definitions = 'Up to date' }
+        ) {
+            param($state, $expected, $definitions)
+            $decoded = ConvertFrom-AvProductState -ProductState $state
+
+            $decoded.State | Should Be $expected
+            $decoded.Definitions | Should Be $definitions
+        }
+
+        It 'flags Defender off when no other antivirus is registered' {
+            $flag = @(Get-AntivirusFlags $false $true @($defender))
+
+            $flag.Count | Should Be 1
+            $flag[0].Severity | Should Be 'Medium'
+        }
+
+        It 'does not flag Defender off when another antivirus is registered' {
+            (Get-AntivirusFlags $false $true @($defender, $other)).Count | Should Be 0
+        }
+
+        It 'does not flag Defender when it is active' {
+            (Get-AntivirusFlags $true $true @($defender)).Count | Should Be 0
+        }
+
+        It 'does not claim Defender is the only product when the registry of products is unavailable' {
+            (Get-AntivirusFlags $false $false @()).Count | Should Be 0
+        }
+    }
+
+    Context 'network grouping' {
+        It 'groups sockets by process and remote IP with a count' {
+            $socket = { param($name, $id, $address, $port) [pscustomobject]@{ ProcessName = $name; Pid = $id; RemoteAddress = $address; RemotePort = $port; RemoteHost = ''; Path = 'C:\Program Files\Demo\net.exe' } }
+            $rows = @(Group-NetworkConnections -Connections @(
+                    (& $socket 'demo-net' 10 '203.0.113.10' 443),
+                    (& $socket 'demo-net' 10 '203.0.113.10' 443),
+                    (& $socket 'demo-net' 11 '203.0.113.10' 8443),
+                    (& $socket 'demo-net' 10 '198.51.100.7' 443),
+                    (& $socket 'demo-other' 12 '203.0.113.10' 443)
+                ))
+
+            $rows.Count | Should Be 3
+            $rows[0].ProcessName | Should Be 'demo-net'
+            $rows[0].RemoteAddress | Should Be '203.0.113.10'
+            $rows[0].Connections | Should Be 3
+            $rows[0].Pids | Should Be '10, 11'
+            $rows[0].RemotePorts | Should Be '443, 8443'
+        }
+    }
+
+    Context 'known findings' {
+        $known = @(
+            [pscustomobject]@{ Title = 'Demo driver bug'; Note = 'Known vendor issue'; Match = [pscustomobject]@{ Name = 'demo-host'; Path = 'C:\Windows\System32\demo-host.exe' } }
+            [pscustomobject]@{ Title = 'Demo OEM shortcut'; Note = 'OEM bloat'; Match = [pscustomobject]@{ Name = 'Demo.lnk'; ProductCode = '{11111111-2222-4333-8444-555555555555}' } }
+        )
+        $hostProcess = [pscustomobject]@{ Name = 'demo-host'; Pid = 9401; Path = 'C:\Windows\System32\demo-host.exe' }
+        $shortcut = [pscustomobject]@{ Kind = 'Startup folder'; Name = 'Demo.lnk'; Command = 'MSI advertised shortcut'; ProductCode = '{11111111-2222-4333-8444-555555555555}' }
+
+        It 'moves a matching flag out of the ranked list' {
+            $flag = [pscustomobject]@{ Severity = 'High'; Rule = 'Demo'; Name = 'demo-host'; Pid = 9401; Path = 'c:\windows\system32\DEMO-HOST.exe'; Sha256 = $null; Reason = 'Demo' }
+            $result = Split-KnownFindings -Flags @($flag) -Snapshot ([pscustomobject]@{ Processes = @($hostProcess); Persistence = @() }) -KnownFindings $known
+
+            @($result.Active).Count | Should Be 0
+            @($result.Triaged | Where-Object { $_.Title -eq 'Demo driver bug' }).Count | Should Be 1
+            @($result.Triaged | Where-Object { $_.Title -eq 'Demo driver bug' })[0].WouldBe | Should Be 'High'
+        }
+
+        It 'keeps a lookalike with the same name at another path' {
+            $flag = [pscustomobject]@{ Severity = 'High'; Rule = 'Demo'; Name = 'demo-host'; Pid = 9402; Path = 'C:\Users\demo\AppData\Local\demo-host.exe'; Sha256 = $null; Reason = 'Demo' }
+            $result = Split-KnownFindings -Flags @($flag) -Snapshot ([pscustomobject]@{ Processes = @(); Persistence = @() }) -KnownFindings $known
+
+            @($result.Active).Count | Should Be 1
+            @($result.Triaged).Count | Should Be 0
+        }
+
+        It 'lists a known item that was observed without raising a flag' {
+            $result = Split-KnownFindings -Flags @() -Snapshot ([pscustomobject]@{ Processes = @(); Persistence = @($shortcut) }) -KnownFindings $known
+
+            @($result.Triaged).Count | Should Be 1
+            $result.Triaged[0].Title | Should Be 'Demo OEM shortcut'
+            $result.Triaged[0].WouldBe | Should Be 'Not flagged'
+        }
+
+        It 'ignores a name-only entry so it cannot hide a lookalike' {
+            $nameOnly = @([pscustomobject]@{ Title = 'Too broad'; Note = ''; Match = [pscustomobject]@{ Name = 'demo-host' } })
+            $flag = [pscustomobject]@{ Severity = 'High'; Rule = 'Demo'; Name = 'demo-host'; Pid = 9403; Path = 'C:\Windows\System32\demo-host.exe'; Sha256 = $null; Reason = 'Demo' }
+            $result = Split-KnownFindings -Flags @($flag) -Snapshot ([pscustomobject]@{ Processes = @(); Persistence = @() }) -KnownFindings $nameOnly
+
+            @($result.Active).Count | Should Be 1
+            @($result.Invalid).Count | Should Be 1
+        }
+    }
+
     It 'does not treat an ordinary Program Files path as user-writable' {
         $candidate = [pscustomobject]@{
             Processes = @([pscustomobject]@{

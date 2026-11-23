@@ -3,6 +3,7 @@ reports/
 logs/
 quarantine/
 *.csv
+known-findings.json
 
 # Local agent and editor state
 .scratch/

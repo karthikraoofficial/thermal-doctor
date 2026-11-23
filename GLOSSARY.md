@@ -8,7 +8,19 @@
 
 **Red flag**: A finding worth investigating, with a severity and a one-line reason. It is not proof of compromise.
 
-**Severity**: High, Medium or Low. High means a strong indicator such as a known miner name. Low means a weak signal that is often legitimate.
+**Severity**: High, Medium, Low or Info. High means a strong indicator such as a known miner name. Low means a weak signal that is often legitimate. Info records something expected, such as a trusted publisher's app in AppData.
+
+**Trusted publisher**: An organisation on the scan's allowlist, read from a valid signing certificate. The file's company field does not count.
+
+**Tool cache**: A uv or Python `Scripts` folder under a user's AppData. Its programs are Info unless unsigned and above 10% CPU.
+
+**Advertised shortcut**: A Windows Installer shortcut whose target is resolved by MSI. Its visible path is only an icon, so the scan reports the owning product instead.
+
+**Wildcard DNS host**: A name such as `sslip.io` or `nip.io` that resolves to an IP embedded in the name.
+
+**Known finding**: An item the owner has already investigated, listed in the gitignored `known-findings.json`.
+
+**Previously triaged**: The report section showing known findings seen in this scan, in place of their severity.
 
 **Top heat contributors**: The 15 processes with the highest average CPU during the sample.
 

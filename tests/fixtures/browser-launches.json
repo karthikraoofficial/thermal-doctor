@@ -1,0 +1,13 @@
+[
+  { "Case": "bare IPv4", "Flagged": true, "Host": "203.0.113.10", "Name": "chrome", "CommandLine": "\"C:\\Program Files\\Demo\\chrome.exe\" --single-argument http://203.0.113.10:8080/login" },
+  { "Case": "sslip.io host", "Flagged": true, "Host": "api.203-0-113-10.sslip.io", "Name": "chrome", "CommandLine": "\"C:\\Program Files\\Demo\\chrome.exe\" --single-argument https://api.203-0-113-10.sslip.io/" },
+  { "Case": "nip.io host in app mode", "Flagged": true, "Host": "198.51.100.7.nip.io", "Name": "msedge", "CommandLine": "\"C:\\Program Files\\Demo\\msedge.exe\" --app=https://198.51.100.7.nip.io/panel" },
+  { "Case": "uppercase wildcard host", "Flagged": true, "Host": "demo.sslip.io", "Name": "firefox", "CommandLine": "firefox.exe HTTPS://DEMO.SSLIP.IO/" },
+  { "Case": "credentials before IP", "Flagged": true, "Host": "192.0.2.5", "Name": "brave", "CommandLine": "brave.exe https://example.test@192.0.2.5/" },
+  { "Case": "ordinary domain", "Flagged": false, "Host": "", "Name": "chrome", "CommandLine": "chrome.exe https://www.example.test/" },
+  { "Case": "lookalike domain", "Flagged": false, "Host": "", "Name": "chrome", "CommandLine": "chrome.exe https://notsslip.io/" },
+  { "Case": "wildcard name in the URL path", "Flagged": false, "Host": "", "Name": "chrome", "CommandLine": "chrome.exe https://www.example.test/sslip.io/203.0.113.10" },
+  { "Case": "loopback dev server", "Flagged": false, "Host": "", "Name": "chrome", "CommandLine": "chrome.exe http://127.0.0.1:3000/" },
+  { "Case": "browser child process", "Flagged": false, "Host": "", "Name": "chrome", "CommandLine": "chrome.exe --type=renderer --demo=http://203.0.113.10/" },
+  { "Case": "non-browser", "Flagged": false, "Host": "", "Name": "demo-client", "CommandLine": "demo-client.exe http://203.0.113.10/" }
+]

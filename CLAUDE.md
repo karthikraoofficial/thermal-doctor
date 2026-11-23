@@ -9,14 +9,15 @@ PowerShell 5.1 diagnostics for a hot Windows PC. See `README.md` for usage and `
 - Never kill, quarantine, delete or reconfigure anything on the host.
 - The scan must generate no network traffic of its own.
 - A source that cannot be read is reported as unavailable, never as clean.
-- This repo is public. Never commit `reports/`, `logs/`, `quarantine/` or any CSV.
+- `examine.ps1` requires Administrator rights and exits before scanning without them.
+- This repo is public. Never commit `reports/`, `logs/`, `quarantine/`, `known-findings.json` or any CSV.
 - Fixtures are fully synthetic: no real usernames, machine names, paths, IPs or hashes. Use placeholders such as `C:\Users\demo`, and documentation IP ranges.
 - Commits use the repo-local GitHub noreply email.
 
 ## Commands
 
 ```powershell
-.\examine.ps1
+.\examine.ps1  # from an elevated PowerShell
 .\logger.ps1
 Import-Module Pester -RequiredVersion 3.4.0; Invoke-Pester -Script .\tests
 ```

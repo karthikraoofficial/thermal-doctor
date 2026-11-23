@@ -9,25 +9,48 @@ Requires Windows PowerShell 5.1. Tests use Pester 3.4.
 
 ## Run a scan
 
+Open PowerShell with **Run as administrator**, then run:
+
 ```powershell
 .\examine.ps1
 ```
 
-The scan takes a little over a minute. The report opens with **Red flags** ranked High, Medium and Low, then **Top heat contributors**, then the raw data.
+Without Administrator rights the scan exits with a message before reading anything and writes no report. The report still says when a source could not be read. Missing data is never treated as a clean result.
 
-A red flag is a prompt to investigate, not proof of compromise. Developer tools and legitimate apps can match path and network rules. Repeated flags for one executable are collapsed into a single line with a process count.
+The scan takes a little over a minute. The report opens with **Red flags** ranked High, Medium, Low and Info, then any **Previously triaged** items, then **Top heat contributors**, then the raw data.
 
-Scheduled tasks that point to a missing executable in a user-writable folder are ranked High, along with any executables left in that folder.
+A red flag is a prompt to investigate, not proof of compromise. Repeated flags for one executable are collapsed into a single line with a process count.
 
-### Run as administrator for full coverage
+- Scheduled tasks that point to a missing executable in a user-writable folder are High, along with any executables left in that folder.
+- AppData processes validly signed by Microsoft, Google, GitHub, Anthropic, OpenAI, Docker or Astral are Info. The publisher comes from the signing certificate, not the file's company field.
+- Programs in uv and Python `Scripts` folders under AppData are Info, unless they are unsigned and above 10% CPU.
+- Browsers launched with a URL at a bare IPv4 address, `sslip.io` or `nip.io` are Medium. Loopback is excluded.
+- Defender being off is Medium only when Security Center lists no other antivirus.
 
-The scan works without admin rights, but Windows then withholds some data:
+Startup shortcuts installed by MSI are shown with their owning product, publisher and install date. Network rows are grouped by process and remote IP with a connection count.
 
-- Paths, signatures and hashes of protected processes
-- ACPI temperatures
-- Startup-impact data
+### Known findings
 
-The report says when a source could not be read. Missing data is never treated as a clean result.
+Items you have already investigated go in `known-findings.json` in the project folder. This file is gitignored.
+
+```json
+{
+  "findings": [
+    {
+      "title": "Demo driver issue",
+      "note": "Known vendor bug",
+      "match": { "name": "demo-host", "path": "C:\\Windows\\System32\\demo-host.exe" }
+    },
+    {
+      "title": "Demo OEM shortcut",
+      "note": "OEM bloat",
+      "match": { "name": "Demo.lnk", "productCode": "{11111111-2222-4333-8444-555555555555}" }
+    }
+  ]
+}
+```
+
+Each match needs a name plus a path or MSI product code, so a lookalike with the same name stays flagged. If the file cannot be read, nothing is marked as triaged and the report says so.
 
 ### Temperatures
 
@@ -55,7 +78,7 @@ Removing the task keeps the existing CSV.
 
 ## Privacy
 
-Reports and logs contain process command lines, file paths and network details. `reports/`, `logs/`, `quarantine/` and all CSV files are gitignored. Do not publish them.
+Reports and logs contain process command lines, file paths and network details. `reports/`, `logs/`, `quarantine/`, `known-findings.json` and all CSV files are gitignored. Do not publish them.
 
 ## Tests
 
