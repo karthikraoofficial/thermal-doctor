@@ -43,4 +43,52 @@ Describe 'Add-HeatLogRow' {
         Add-HeatLogRow -Path $path -Timestamp $time -CpuCelsius $null -TotalCpuPercent 10 -TopProcesses $top
         @(Import-Csv $path)[0].CpuTempC | Should Be ''
     }
+
+    It 'records package temperature and the flag' {
+        $path = Join-Path $TestDrive 'flag.csv'
+
+        Add-HeatLogRow -Path $path -Timestamp $time -CpuCelsius 70 -CpuPackageCelsius 81.5 -TotalCpuPercent 10 -TopProcesses $top -Flag 'TiWorker (8%)'
+        $row = @(Import-Csv $path)[0]
+
+        $row.CpuPackageTempC | Should Be '81.5'
+        $row.Flag | Should Be 'TiWorker (8%)'
+    }
+
+    It 'leaves package temperature blank without a sensor reading' {
+        $path = Join-Path $TestDrive 'nopackage.csv'
+
+        Add-HeatLogRow -Path $path -Timestamp $time -CpuCelsius 70 -CpuPackageCelsius $null -TotalCpuPercent 10 -TopProcesses $top
+        @(Import-Csv $path)[0].CpuPackageTempC | Should Be ''
+    }
+
+    It 'keeps an older CSV intact and writes new rows beside it' {
+        $path = Join-Path $TestDrive 'old.csv'
+        $old = "`"Timestamp`",`"CpuTempC`",`"TotalCpuPercent`",`"Top1`",`"Top2`",`"Top3`",`"Top4`",`"Top5`"`r`n`"2026-01-01T00:00:00`",`"60`",`"5`",`"`",`"`",`"`",`"`",`"`"`r`n"
+        [IO.File]::WriteAllText($path, $old)
+
+        Add-HeatLogRow -Path $path -Timestamp $time -CpuCelsius 70 -TotalCpuPercent 10 -TopProcesses $top
+
+        [IO.File]::ReadAllText($path) | Should Be $old
+        @(Import-Csv (Join-Path $TestDrive 'old-v2.csv')).Count | Should Be 1
+    }
+}
+
+Describe 'Get-HeatFlag' {
+    It 'names watched processes above 5% and sums their instances' {
+        $processes = @(
+            [pscustomobject]@{ Name = 'TiWorker'; CpuPercent = 3 }
+            [pscustomobject]@{ Name = 'tiworker'; CpuPercent = 4 }
+            [pscustomobject]@{ Name = 'SearchIndexer'; CpuPercent = 6.5 }
+            [pscustomobject]@{ Name = 'demo-app'; CpuPercent = 50 }
+        )
+        Get-HeatFlag -Processes $processes | Should Be 'TiWorker (7%); SearchIndexer (6.5%)'
+    }
+
+    It 'does not flag a watched process at exactly 5%' {
+        Get-HeatFlag -Processes @([pscustomobject]@{ Name = 'MoUsoCoreWorker'; CpuPercent = 5 }) | Should Be ''
+    }
+
+    It 'flags TrustedInstaller above 5%' {
+        Get-HeatFlag -Processes @([pscustomobject]@{ Name = 'TrustedInstaller'; CpuPercent = 5.1 }) | Should Be 'TrustedInstaller (5.1%)'
+    }
 }

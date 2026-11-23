@@ -1,0 +1,3 @@
+# The optimizer is the only code that changes the host
+
+Thermal Doctor began as read-only, and `examine.ps1` stays that way. `optimize.ps1` is the single exception: it previews by default, and with `-Apply` it needs a typed "yes" per action, logs each outcome and records an undo step before changing anything. Its targets and protected items live in a gitignored local file, because this repo is public and those lists describe one person's machine. Without that file it stops. Startup items are disabled through the same approval values Task Manager uses, so the programs and their Run entries stay in place. The cost is that a fresh clone does nothing until the owner writes a targets file.

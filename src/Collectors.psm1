@@ -202,6 +202,19 @@ function Get-TemperatureReading {
     return [pscustomobject]@{ Source = 'None'; CpuCelsius = $null; Rows = @(); Note = "no sensor data ($($problems -join '; '))" }
 }
 
+function Get-CpuPackageTemperature {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $sensors = @(Get-CimInstance -Namespace 'root/LibreHardwareMonitor' -ClassName Sensor -Filter "SensorType='Temperature'" -ErrorAction Stop)
+        $package = @($sensors | Where-Object { $_.Identifier -match '(?i)cpu' -and $_.Name -match '(?i)package' } | Select-Object -First 1)
+        if ($package.Count -gt 0) { return [math]::Round([double]$package[0].Value, 1) }
+    }
+    catch { return $null }
+    return $null
+}
+
 function Get-TemperatureSection {
     [CmdletBinding()]
     param()
@@ -515,4 +528,4 @@ function Get-ContextSections {
     Get-StartupImpactSection
 }
 
-Export-ModuleMember -Function Get-CpuByProcessId, Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData, Get-AntivirusData, Read-KnownFindings, Get-DefenderSections, Get-ContextSections
+Export-ModuleMember -Function Get-CpuByProcessId, Get-ProcessSnapshot, Add-FlagHashes, New-Section, Get-GpuSection, Get-TemperatureReading, Get-CpuPackageTemperature, Get-TemperatureSection, Get-PersistenceData, Get-NetworkData, Get-AntivirusData, Read-KnownFindings, Get-DefenderSections, Get-ContextSections

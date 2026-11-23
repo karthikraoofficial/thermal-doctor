@@ -1,9 +1,10 @@
 # Thermal Doctor
 
-Read-only Windows diagnostics for finding out why a PC is running hot, and whether something unwanted, such as a cryptominer, is involved.
+Windows diagnostics for finding out why a PC is running hot, and whether something unwanted, such as a cryptominer, is involved, plus an opt-in optimizer for reducing heat.
 
-- `examine.ps1` scans the system and writes one Markdown report to `reports\report-<timestamp>.md`.
+- `examine.ps1` is read-only. It scans the system and writes one Markdown report to `reports\report-<timestamp>.md`.
 - `logger.ps1` appends one heat sample to `logs\heat-log.csv`. A scheduled task can run it every 2 minutes.
+- `optimize.ps1` previews heat-reduction changes and applies them only with `-Apply` and a typed "yes" per action.
 
 Requires Windows PowerShell 5.1. Tests use Pester 3.4.
 
@@ -76,9 +77,26 @@ Unregister-ScheduledTask -TaskName 'Thermal Doctor Logger' -Confirm:$false
 
 Removing the task keeps the existing CSV.
 
+Each row includes `CpuPackageTempC`, from LibreHardwareMonitor only, and `Flag`, which names TiWorker, MoUsoCoreWorker, TrustedInstaller or SearchIndexer above 5% CPU. LibreHardwareMonitor must be running with its WMI namespace available, otherwise the temperature stays blank. A log with the older columns is left untouched and new rows go to `heat-log-v2.csv`.
+
+## Optimizer
+
+Copy `optimize-targets.example.json` to `optimize-targets.json` and list your targets and protected items. That file is gitignored.
+
+```powershell
+.\optimize.ps1          # preview, changes nothing
+.\optimize.ps1 -WhatIf  # same
+.\optimize.ps1 -Apply   # from an elevated PowerShell, asks for "yes" per action
+.\undo.ps1              # from an elevated PowerShell, reverses applied actions
+```
+
+Outcomes go to `logs\actions.log`. An earlier `undo.ps1` is moved to `logs\` rather than overwritten. WSL limits take effect after `wsl --shutdown`, which stops running distros and Docker. Apps on the uninstall list are printed and never removed.
+
+The 99% processor cap stops turbo boost. On low-power laptop CPUs this can cut single-core speed sharply, so check that the machine still feels fast enough.
+
 ## Privacy
 
-Reports and logs contain process command lines, file paths and network details. `reports/`, `logs/`, `quarantine/`, `known-findings.json` and all CSV files are gitignored. Do not publish them.
+Reports and logs contain process command lines, file paths and network details. `reports/`, `logs/`, `quarantine/`, `known-findings.json`, `optimize-targets.json`, `undo.ps1` and all CSV files are gitignored. Do not publish them.
 
 ## Tests
 

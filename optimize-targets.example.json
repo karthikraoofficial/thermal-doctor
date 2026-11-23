@@ -1,0 +1,18 @@
+{
+  "protected": ["demo-do-not-touch"],
+  "power": { "maxProcessorPercent": 99 },
+  "wsl": { "processors": 2, "memory": "4GB" },
+  "runRemovals": [
+    { "label": "Demo App", "key": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "name": "DemoApp" }
+  ],
+  "startup": [
+    { "label": "Demo Updater", "key": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run", "name": "DemoUpdater", "approvedKey": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run" },
+    { "label": "Demo Shortcut", "folder": "%ProgramData%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup", "name": "Demo.lnk", "approvedKey": "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\StartupFolder", "ask": true }
+  ],
+  "tasks": [
+    { "label": "Demo task", "path": "\\Demo\\", "name": "DemoTask" }
+  ],
+  "uninstall": [
+    { "label": "Demo App", "displayName": "Demo App" }
+  ]
+}

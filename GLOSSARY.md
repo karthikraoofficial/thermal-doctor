@@ -35,3 +35,15 @@
 **Unavailable**: A source that could not be read. It is never equivalent to a clean result.
 
 **Heat log**: The CSV of periodic samples written by the logger.
+
+**CPU package temperature**: The whole-processor reading from LibreHardwareMonitor. The heat log leaves it blank when that sensor is unavailable.
+
+**Servicing flag**: The heat log column naming TiWorker, MoUsoCoreWorker, TrustedInstaller or SearchIndexer when one exceeds 5% Normalised CPU.
+
+**Optimizer plan**: The list of proposed host changes with current state, new state and how to undo each. Previewing it changes nothing.
+
+**Targets file**: The gitignored `optimize-targets.json` listing what the optimizer may change and what is protected.
+
+**Protected item**: A targets-file pattern. Anything matching it is shown as Protected and can never be applied.
+
+**Turbo cap**: Setting maximum processor state to 99%, which stops the CPU boosting above its base frequency.

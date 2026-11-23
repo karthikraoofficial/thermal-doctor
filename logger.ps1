@@ -26,5 +26,11 @@ $top = @($cpuById.GetEnumerator() | Sort-Object -Property Value -Descending | Se
         }
     })
 
+$sampled = @($cpuById.GetEnumerator() | Where-Object { $namesById.ContainsKey([int]$_.Key) } | ForEach-Object {
+        [pscustomobject]@{ Name = $namesById[[int]$_.Key]; CpuPercent = $_.Value }
+    })
+$flag = Get-HeatFlag -Processes $sampled
+
 $temperature = Get-TemperatureReading
-Add-HeatLogRow -Path $LogPath -Timestamp $timestamp -CpuCelsius $temperature.CpuCelsius -TotalCpuPercent $totalCpu -TopProcesses $top
+$package = Get-CpuPackageTemperature
+Add-HeatLogRow -Path $LogPath -Timestamp $timestamp -CpuCelsius $temperature.CpuCelsius -CpuPackageCelsius $package -TotalCpuPercent $totalCpu -TopProcesses $top -Flag $flag

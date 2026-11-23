@@ -4,6 +4,8 @@ logs/
 quarantine/
 *.csv
 known-findings.json
+optimize-targets.json
+undo.ps1
 
 # Local agent and editor state
 .scratch/
